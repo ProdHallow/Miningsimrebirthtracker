@@ -2,23 +2,37 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- // 1. CLEANUP PREVIOUS INSTANCES (Prevents Duplication) //
+local function Cleanup()
+    if PlayerGui:FindFirstChild("ScreenGui") and PlayerGui.ScreenGui:FindFirstChild("StatsFrame") then
+        local existing = PlayerGui.ScreenGui.StatsFrame:FindFirstChild("TrackerContainer")
+        if existing then existing:Destroy() end
+        
+        -- Clean up old loose elements from previous versions just in case
+        local oldNames = {"RebirthTracker", "1min", "5min", "Start", "Custom", "Set", "ResultLabel", "TrackerElements"}
+        for _, name in pairs(oldNames) do
+            local old = PlayerGui.ScreenGui.StatsFrame:FindFirstChild(name)
+            if old then old:Destroy() end
+        end
+    end
+end
+Cleanup()
+
+-- // 2. WAIT FOR GAME LOAD //
 repeat task.wait() until game:IsLoaded()
 
 local function WaitForStats()
     local timeout = tick() + 30
     while tick() < timeout do
         local success = pcall(function()
-            local leaderstats = LocalPlayer:WaitForChild("leaderstats", 5)
-            local screenGui = PlayerGui:WaitForChild("ScreenGui", 5)
-            local statsFrame = screenGui:WaitForChild("StatsFrame", 5)
+            local leaderstats = LocalPlayer:WaitForChild("leaderstats", 1)
+            local screenGui = PlayerGui:WaitForChild("ScreenGui", 1)
+            local statsFrame = screenGui:WaitForChild("StatsFrame", 1)
             
-            leaderstats:WaitForChild("Blocks Mined", 5)
-            statsFrame:WaitForChild("Coins", 5):FindFirstChild("Amount")
-            statsFrame:WaitForChild("Tokens", 5):WaitForChild("Amount", 5)
+            if not leaderstats or not statsFrame then error("Waiting...") end
             
-            if statsFrame.Tokens.Amount.Text == "Loading..." then
-                error("Still loading")
-            end
+            -- Check specifically for the stats we need
+            if not leaderstats:FindFirstChild("Blocks Mined") then error("No blocks stat") end
         end)
         
         if success then return true end
@@ -28,10 +42,11 @@ local function WaitForStats()
 end
 
 if not WaitForStats() then
-    warn("Failed to load stats")
+    warn("Failed to load Leaderstats or GUI. Script stopped to prevent errors.")
     return
 end
 
+-- // 3. VARIABLES & STATE //
 local ScreenGui = PlayerGui.ScreenGui
 local StatsFrame = ScreenGui.StatsFrame
 local Leaderstats = LocalPlayer.leaderstats
@@ -40,14 +55,135 @@ local State = {
     Running = false,
     TimeOption = nil,
     WaitTime = 0,
-    DisplayTime = 0,
     StartBlocks = 0,
     StartRebirths = 0,
     ElapsedTime = 0,
     Stopping = false
 }
 
-local Buttons = {}
+-- // 4. UI CONSTRUCTION (Using Layouts to prevent Overlaps) //
+
+-- Create a Holder Frame that sits above the StatsFrame
+local Container = Instance.new("Frame")
+Container.Name = "TrackerContainer"
+Container.Parent = StatsFrame
+Container.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Container.BackgroundTransparency = 1
+-- Positioned slightly above the StatsFrame, stretching upwards
+Container.Position = UDim2.new(0, 0, -3.2, 0) 
+Container.Size = UDim2.new(1, 0, 3, 0)
+Container.ZIndex = 10
+
+-- Add Layout (This automatically stacks items so they NEVER overlap)
+local Layout = Instance.new("UIListLayout")
+Layout.Parent = Container
+Layout.SortOrder = Enum.SortOrder.LayoutOrder
+Layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+Layout.Padding = UDim.new(0, 5)
+
+-- Helper function to create the rounded look
+local function CreateRoundedFrame(name, height, layoutOrder)
+    local frame = Instance.new("ImageLabel")
+    frame.Name = name
+    frame.Parent = Container
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.new(0.95, 0, 0, height) -- 95% width to fit nicely
+    frame.Image = "rbxassetid://1511196841" -- Slice image
+    frame.ImageColor3 = Color3.fromRGB(39, 180, 255) -- Blue
+    frame.ScaleType = Enum.ScaleType.Slice
+    frame.SliceCenter = Rect.new(9, 11, 91, 89)
+    frame.LayoutOrder = layoutOrder
+    return frame
+end
+
+-- --- ELEMENT 1: CUSTOM INPUT ROW ---
+local CustomRow = CreateRoundedFrame("CustomRow", 35, 1)
+CustomRow.ImageColor3 = Color3.fromRGB(248, 248, 248) -- Lighter background for input
+
+local TimeInput = Instance.new("TextBox")
+TimeInput.Parent = CustomRow
+TimeInput.BackgroundTransparency = 1
+TimeInput.Position = UDim2.new(0.05, 0, 0, 0)
+TimeInput.Size = UDim2.new(0.65, 0, 1, 0)
+TimeInput.Font = Enum.Font.Arial
+TimeInput.Text = "Time (s)"
+TimeInput.PlaceholderText = "Time (s)"
+TimeInput.TextColor3 = Color3.fromRGB(100, 100, 100)
+TimeInput.TextSize = 14
+TimeInput.ClearTextOnFocus = true
+
+local SetButton = Instance.new("TextButton")
+SetButton.Name = "SetBtn"
+SetButton.Parent = CustomRow
+SetButton.BackgroundTransparency = 1
+SetButton.Position = UDim2.new(0.7, 0, 0, 0)
+SetButton.Size = UDim2.new(0.3, 0, 1, 0)
+SetButton.Font = Enum.Font.ArialBold
+SetButton.Text = "SET"
+SetButton.TextColor3 = Color3.fromRGB(39, 180, 255)
+SetButton.TextSize = 14
+
+-- --- ELEMENT 2: PRESET BUTTONS ROW ---
+local PresetRow = Instance.new("Frame")
+PresetRow.Name = "PresetRow"
+PresetRow.Parent = Container
+PresetRow.BackgroundTransparency = 1
+PresetRow.Size = UDim2.new(0.95, 0, 0, 35)
+PresetRow.LayoutOrder = 2
+
+local Min1Frame = Instance.new("ImageLabel") -- 1 Min Wrapper
+Min1Frame.Parent = PresetRow
+Min1Frame.BackgroundTransparency = 1
+Min1Frame.Size = UDim2.new(0.48, 0, 1, 0)
+Min1Frame.Image = "rbxassetid://1511196841"
+Min1Frame.ImageColor3 = Color3.fromRGB(39, 180, 255)
+Min1Frame.ScaleType = Enum.ScaleType.Slice
+Min1Frame.SliceCenter = Rect.new(9, 11, 91, 89)
+
+local Min1Btn = Instance.new("TextButton")
+Min1Btn.Parent = Min1Frame
+Min1Btn.BackgroundTransparency = 1
+Min1Btn.Size = UDim2.new(1, 0, 1, 0)
+Min1Btn.Font = Enum.Font.ArialBold
+Min1Btn.Text = "1 MIN"
+Min1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Min1Btn.TextSize = 14
+
+local Min5Frame = Min1Frame:Clone() -- 5 Min Wrapper
+Min5Frame.Parent = PresetRow
+Min5Frame.Position = UDim2.new(0.52, 0, 0, 0)
+
+local Min5Btn = Min5Frame:FindFirstChildOfClass("TextButton")
+Min5Btn.Text = "5 MIN"
+
+-- --- ELEMENT 3: START BUTTON ---
+local StartFrame = CreateRoundedFrame("StartFrame", 40, 3)
+
+local StartButton = Instance.new("TextButton")
+StartButton.Parent = StartFrame
+StartButton.BackgroundTransparency = 1
+StartButton.Size = UDim2.new(1, 0, 1, 0)
+StartButton.Font = Enum.Font.ArialBold
+StartButton.Text = "START TRACKING"
+StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+StartButton.TextSize = 16
+
+-- --- ELEMENT 4: STATUS/DISPLAY LABEL ---
+local StatusFrame = CreateRoundedFrame("StatusFrame", 30, 4)
+StatusFrame.ImageColor3 = Color3.fromRGB(30, 30, 30)
+StatusFrame.ImageTransparency = 0.5
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Parent = StatusFrame
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Size = UDim2.new(1, 0, 1, 0)
+StatusLabel.Font = Enum.Font.Arial
+StatusLabel.Text = "Select a time to begin"
+StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+StatusLabel.TextSize = 14
+
+-- // 5. LOGIC & FUNCTIONS //
 
 local function FormatNumber(num)
     local formatted = tostring(num)
@@ -59,452 +195,133 @@ local function FormatNumber(num)
     return formatted
 end
 
-local sell = StatsFrame:FindFirstChild("Sell")
-if sell then
-    sell.Position = UDim2.new(-10, 0, -10, 0)
-end
-
-local existingTracker = StatsFrame:FindFirstChild("RebirthTracker")
-if existingTracker then existingTracker:Destroy() end
-
-local existing1min = StatsFrame:FindFirstChild("1min")
-if existing1min then existing1min:Destroy() end
-
-local existing5min = StatsFrame:FindFirstChild("5min")
-if existing5min then existing5min:Destroy() end
-
-local existingStart = StatsFrame:FindFirstChild("Start")
-if existingStart then existingStart:Destroy() end
-
-local existingCustom = StatsFrame:FindFirstChild("Custom")
-if existingCustom then existingCustom:Destroy() end
-
-local existingSet = StatsFrame:FindFirstChild("Set")
-if existingSet then existingSet:Destroy() end
-
-local tokensGui = StatsFrame:FindFirstChild("Tokens")
-if not tokensGui then
-    warn("Tokens GUI not found")
-    return
-end
-
-local DisplayGui = tokensGui:Clone()
-DisplayGui.Name = "RebirthTracker"
-DisplayGui.Parent = StatsFrame
-DisplayGui.Position = UDim2.new(0, 0, -1.4, 0)
-
-local moreBtn = DisplayGui:FindFirstChild("More")
-if moreBtn then 
-    moreBtn:Destroy() 
-end
-
-local logo = DisplayGui:FindFirstChild("Logo")
-if logo then
-    logo.Image = "rbxassetid://15906467021"
-end
-
-local DisplayAmount = DisplayGui:FindFirstChild("Amount")
-if DisplayAmount then
-    local coinsFrame = StatsFrame:FindFirstChild("Coins")
-    if coinsFrame then
-        local coinsAmountLabel = coinsFrame:FindFirstChild("Amount")
-        if coinsAmountLabel then
-            DisplayAmount.TextColor3 = coinsAmountLabel.TextColor3
-        end
-    end
-    DisplayAmount.Text = ":3"
-end
-
-local _1min = Instance.new("ImageLabel")
-_1min.Name = "1min"
-_1min.Parent = StatsFrame
-_1min.Active = true
-_1min.BackgroundColor3 = Color3.fromRGB(248, 248, 248)
-_1min.BackgroundTransparency = 1.000
-_1min.Position = UDim2.new(0.52, 0, -1.8, 0)
-_1min.Size = UDim2.new(0.23, 0, 0.24, 0)
-_1min.ZIndex = 2
-_1min.Image = "rbxassetid://1511196841"
-_1min.ImageColor3 = Color3.fromRGB(39, 180, 255)
-_1min.ScaleType = Enum.ScaleType.Slice
-_1min.SliceCenter = Rect.new(9, 11, 91, 89)
-
-local minutebutton = Instance.new("TextButton")
-minutebutton.Name = "MinuteButton"
-minutebutton.Parent = _1min
-minutebutton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-minutebutton.BackgroundTransparency = 1.000
-minutebutton.BorderSizePixel = 0
-minutebutton.Position = UDim2.new(0, 0, 0, 0)
-minutebutton.Size = UDim2.new(1, 0, 1, 0)
-minutebutton.ZIndex = 3
-minutebutton.Font = Enum.Font.Arial
-minutebutton.Text = "1 Min"
-minutebutton.TextColor3 = Color3.fromRGB(255, 255, 255)
-minutebutton.TextScaled = true
-minutebutton.TextSize = 14.000
-minutebutton.TextWrapped = true
-minutebutton.TextStrokeTransparency = 0.5
-Buttons.Minute = minutebutton
-
-local _5min = Instance.new("ImageLabel")
-_5min.Name = "5min"
-_5min.Parent = StatsFrame
-_5min.Active = true
-_5min.BackgroundColor3 = Color3.fromRGB(248, 248, 248)
-_5min.BackgroundTransparency = 1.000
-_5min.Position = UDim2.new(0.76, 0, -1.8, 0)
-_5min.Size = UDim2.new(0.23, 0, 0.24, 0)
-_5min.ZIndex = 2
-_5min.Image = "rbxassetid://1511196841"
-_5min.ImageColor3 = Color3.fromRGB(39, 180, 255)
-_5min.ScaleType = Enum.ScaleType.Slice
-_5min.SliceCenter = Rect.new(9, 11, 91, 89)
-
-local fiveminutebutton = Instance.new("TextButton")
-fiveminutebutton.Name = "FiveMinuteButton"
-fiveminutebutton.Parent = _5min
-fiveminutebutton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-fiveminutebutton.BackgroundTransparency = 1.000
-fiveminutebutton.BorderSizePixel = 0
-fiveminutebutton.Position = UDim2.new(0, 0, 0, 0)
-fiveminutebutton.Size = UDim2.new(1, 0, 1, 0)
-fiveminutebutton.ZIndex = 3
-fiveminutebutton.Font = Enum.Font.Arial
-fiveminutebutton.Text = "5 Min"
-fiveminutebutton.TextColor3 = Color3.fromRGB(255, 255, 255)
-fiveminutebutton.TextScaled = true
-fiveminutebutton.TextSize = 14.000
-fiveminutebutton.TextWrapped = true
-fiveminutebutton.TextStrokeTransparency = 0.5
-Buttons.FiveMinute = fiveminutebutton
-
-local Start = Instance.new("ImageLabel")
-Start.Name = "Start"
-Start.Parent = StatsFrame
-Start.Active = true
-Start.BackgroundColor3 = Color3.fromRGB(248, 248, 248)
-Start.BackgroundTransparency = 1.000
-Start.Position = UDim2.new(0, 0, -1.8, 0)
-Start.Size = UDim2.new(0.48, 0, 0.24, 0)
-Start.ZIndex = 2
-Start.Image = "rbxassetid://1511196841"
-Start.ImageColor3 = Color3.fromRGB(39, 180, 255)
-Start.ScaleType = Enum.ScaleType.Slice
-Start.SliceCenter = Rect.new(9, 11, 91, 89)
-
-local StartButton = Instance.new("TextButton")
-StartButton.Name = "StartButton"
-StartButton.Parent = Start
-StartButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-StartButton.BackgroundTransparency = 1.000
-StartButton.BorderSizePixel = 0
-StartButton.Position = UDim2.new(0, 0, 0, 0)
-StartButton.Size = UDim2.new(1, 0, 1, 0)
-StartButton.ZIndex = 3
-StartButton.Font = Enum.Font.Arial
-StartButton.Text = "Start"
-StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-StartButton.TextScaled = true
-StartButton.TextSize = 14.000
-StartButton.TextWrapped = true
-StartButton.TextStrokeTransparency = 0.5
-
-local ResultLabel = Instance.new("TextLabel")
-ResultLabel.Name = "ResultLabel"
-ResultLabel.Parent = StatsFrame
-ResultLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-ResultLabel.BackgroundTransparency = 1.000
-ResultLabel.BorderSizePixel = 0
-ResultLabel.Position = UDim2.new(0, 0, -2.2, 0)
-ResultLabel.Size = UDim2.new(1, 0, 0, 35)
-ResultLabel.ZIndex = 2
-ResultLabel.Font = Enum.Font.Arial
-ResultLabel.Text = ""
-ResultLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-ResultLabel.TextScaled = true
-ResultLabel.TextSize = 14.000
-ResultLabel.TextStrokeTransparency = 0.500
-ResultLabel.TextWrapped = true
-
-local Custom = Instance.new("ImageLabel")
-Custom.Name = "Custom"
-Custom.Parent = StatsFrame
-Custom.Active = true
-Custom.BackgroundColor3 = Color3.fromRGB(248, 248, 248)
-Custom.BackgroundTransparency = 1.000
-Custom.Position = UDim2.new(0, 0, -2.55, 0)
-Custom.Size = UDim2.new(0.70, 0, 0.24, 0)
-Custom.ZIndex = 2
-Custom.Image = "rbxassetid://1511196841"
-Custom.ImageColor3 = Color3.fromRGB(39, 180, 255)
-Custom.ScaleType = Enum.ScaleType.Slice
-Custom.SliceCenter = Rect.new(9, 11, 91, 89)
-
-local TextBox = Instance.new("TextBox")
-TextBox.Name = "TimeInput"
-TextBox.Parent = Custom
-TextBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-TextBox.BackgroundTransparency = 1.000
-TextBox.BorderSizePixel = 0
-TextBox.Position = UDim2.new(0.05, 0, 0.1, 0)
-TextBox.Size = UDim2.new(0.9, 0, 0.8, 0)
-TextBox.ZIndex = 3
-TextBox.Font = Enum.Font.Arial
-TextBox.Text = "Time (Sec)"
-TextBox.PlaceholderText = "Time (Sec)"
-TextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-TextBox.TextScaled = true
-TextBox.TextSize = 14.000
-TextBox.TextStrokeTransparency = 0.500
-TextBox.TextWrapped = true
-TextBox.ClearTextOnFocus = true
-
-local Set = Instance.new("ImageLabel")
-Set.Name = "Set"
-Set.Parent = StatsFrame
-Set.Active = true
-Set.BackgroundColor3 = Color3.fromRGB(248, 248, 248)
-Set.BackgroundTransparency = 1.000
-Set.Position = UDim2.new(0.72, 0, -2.55, 0)
-Set.Size = UDim2.new(0.27, 0, 0.24, 0)
-Set.ZIndex = 2
-Set.Image = "rbxassetid://1511196841"
-Set.ImageColor3 = Color3.fromRGB(39, 180, 255)
-Set.ScaleType = Enum.ScaleType.Slice
-Set.SliceCenter = Rect.new(9, 11, 91, 89)
-
-local setbutton = Instance.new("TextButton")
-setbutton.Name = "SetButton"
-setbutton.Parent = Set
-setbutton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-setbutton.BackgroundTransparency = 1.000
-setbutton.BorderSizePixel = 0
-setbutton.Position = UDim2.new(0, 0, 0, 0)
-setbutton.Size = UDim2.new(1, 0, 1, 0)
-setbutton.ZIndex = 3
-setbutton.Font = Enum.Font.Arial
-setbutton.Text = "Set"
-setbutton.TextColor3 = Color3.fromRGB(255, 255, 255)
-setbutton.TextScaled = true
-setbutton.TextSize = 14.000
-setbutton.TextStrokeTransparency = 0.500
-setbutton.TextWrapped = true
-Buttons.Custom = setbutton
-
-local function SetDisplayText(text)
-    if DisplayAmount and DisplayAmount.Parent then
-        DisplayAmount.Text = text
-    end
-end
-
-local function SetResultText(text)
-    if ResultLabel and ResultLabel.Parent then
-        ResultLabel.Text = text
-    end
-end
-
-local function ResetButtonColors()
-    if minutebutton and minutebutton.Parent then
-        minutebutton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    end
-    if fiveminutebutton and fiveminutebutton.Parent then
-        fiveminutebutton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    end
-    if setbutton and setbutton.Parent then
-        setbutton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    end
-end
-
-local function ResetState()
-    State.Running = false
-    State.TimeOption = nil
-    State.WaitTime = 0
-    State.DisplayTime = 0
-    State.StartBlocks = 0
-    State.StartRebirths = 0
-    State.ElapsedTime = 0
-    State.Stopping = false
-    
-    ResetButtonColors()
-    
-    if StartButton and StartButton.Parent then
-        StartButton.Text = "Start"
-        StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    end
-    
-    if TextBox and TextBox.Parent then
-        TextBox.Text = "Time (Sec)"
-    end
-end
-
 local function GetStats()
     local blocks = 0
     local rebirths = 0
     
-    pcall(function()
-        local blocksMined = Leaderstats:FindFirstChild("Blocks Mined")
-        if blocksMined then
-            blocks = blocksMined.Value
-        end
-    end)
-    
-    pcall(function()
-        local rebirthsVal = Leaderstats:FindFirstChild("Rebirths")
-        if rebirthsVal then
-            rebirths = rebirthsVal.Value
-        end
-    end)
+    if Leaderstats:FindFirstChild("Blocks Mined") then
+        blocks = Leaderstats["Blocks Mined"].Value
+    end
+    if Leaderstats:FindFirstChild("Rebirths") then
+        rebirths = Leaderstats["Rebirths"].Value
+    end
     
     return blocks, rebirths
 end
 
-local function ShowResults(blocks, rebirths, time)
-    local msg = "You Mined " .. FormatNumber(blocks) .. " Blocks and did " .. FormatNumber(rebirths) .. " Rebirths in " .. time .. "S"
-    SetDisplayText(msg)
-    SetResultText(msg)
+local function ResetVisuals()
+    Min1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Min5Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    SetButton.TextColor3 = Color3.fromRGB(39, 180, 255)
+end
+
+local function ResetState()
+    State.Running = false
+    State.Stopping = false
+    State.ElapsedTime = 0
+    StartButton.Text = "START TRACKING"
+    StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 end
 
 local function StartTracking()
+    -- Check selection
     if State.WaitTime <= 0 then
-        SetDisplayText("Select 1 Option to start")
+        StatusLabel.Text = "Please select a time first!"
         return
     end
     
+    -- Handle Stopping
     if State.Running then
         State.Stopping = true
-        SetDisplayText("Stopping..")
+        StatusLabel.Text = "Stopping..."
         return
     end
     
+    -- Initialize
     State.Running = true
     State.Stopping = false
     State.ElapsedTime = 0
     
-    SetDisplayText("Starting...")
+    StartButton.Text = "STOP"
+    StartButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+    StatusLabel.Text = "Starting in 3..."
     
-    if StartButton and StartButton.Parent then
-        StartButton.Text = "Stop"
-        StartButton.TextColor3 = Color3.fromRGB(255, 0, 0)
-    end
-    
-    task.wait(5)
-    
-    if State.Stopping then
-        State.ElapsedTime = State.ElapsedTime - 1
-        if State.ElapsedTime < 0 then State.ElapsedTime = 0 end
-        local endBlocks, endRebirths = GetStats()
-        local minedBlocks = endBlocks - State.StartBlocks
-        local doneRebirths = endRebirths - State.StartRebirths
-        ShowResults(minedBlocks, doneRebirths, State.ElapsedTime)
-        ResetState()
-        return
-    end
-    
-    State.StartBlocks, State.StartRebirths = GetStats()
-    local remainingTime = State.WaitTime
-    
-    while remainingTime > 0 and not State.Stopping do
-        SetDisplayText(remainingTime .. "s left")
+    -- Countdown
+    for i = 3, 1, -1 do
+        if State.Stopping then ResetState(); StatusLabel.Text = "Cancelled"; return end
+        StatusLabel.Text = "Starting in " .. i .. "..."
         task.wait(1)
-        remainingTime = remainingTime - 1
+    end
+    
+    if State.Stopping then ResetState(); StatusLabel.Text = "Cancelled"; return end
+
+    -- Capture Base Stats
+    State.StartBlocks, State.StartRebirths = GetStats()
+    
+    local remaining = State.WaitTime
+    
+    -- Main Loop
+    while remaining > 0 do
+        if State.Stopping then break end
+        StatusLabel.Text = "Time Left: " .. remaining .. "s"
+        task.wait(1)
+        remaining = remaining - 1
         State.ElapsedTime = State.ElapsedTime + 1
     end
     
+    -- Final Calculation
     local endBlocks, endRebirths = GetStats()
-    local minedBlocks = endBlocks - State.StartBlocks
-    local doneRebirths = endRebirths - State.StartRebirths
+    local gainedBlocks = math.max(0, endBlocks - State.StartBlocks)
+    local gainedRebirths = math.max(0, endRebirths - State.StartRebirths)
     
-    if State.Stopping then
-        State.ElapsedTime = State.ElapsedTime - 1
-        if State.ElapsedTime < 0 then State.ElapsedTime = 0 end
-        ShowResults(minedBlocks, doneRebirths, State.ElapsedTime)
-    else
-        SetDisplayText("1 sec")
-        task.wait(1)
-        ShowResults(minedBlocks, doneRebirths, State.DisplayTime)
-    end
+    local timeText = State.Stopping and State.ElapsedTime or State.WaitTime
+    
+    StatusLabel.Text = "B: " .. FormatNumber(gainedBlocks) .. " | R: " .. FormatNumber(gainedRebirths)
     
     ResetState()
 end
 
-minutebutton.MouseButton1Click:Connect(function()
-    if State.Running then
-        SetDisplayText("Cant Change while Running")
-        return
-    end
+-- // 6. BUTTON CONNECTIONS //
+
+Min1Btn.MouseButton1Click:Connect(function()
+    if State.Running then return end
+    ResetVisuals()
     
-    if State.TimeOption == "FiveMinute" or State.TimeOption == "Custom" then
-        SetDisplayText("You can only select 1 option")
-        return
-    end
-    
-    if State.TimeOption == "Minute" then
+    if State.TimeOption == "1min" then
         State.TimeOption = nil
         State.WaitTime = 0
-        State.DisplayTime = 0
-        minutebutton.TextColor3 = Color3.fromRGB(255, 255, 255)
     else
-        State.TimeOption = "Minute"
+        State.TimeOption = "1min"
         State.WaitTime = 60
-        State.DisplayTime = 60
-        minutebutton.TextColor3 = Color3.fromRGB(85, 255, 0)
+        Min1Btn.TextColor3 = Color3.fromRGB(85, 255, 0)
     end
 end)
 
-fiveminutebutton.MouseButton1Click:Connect(function()
-    if State.Running then
-        SetDisplayText("Cant Change while Running")
-        return
-    end
+Min5Btn.MouseButton1Click:Connect(function()
+    if State.Running then return end
+    ResetVisuals()
     
-    if State.TimeOption == "Minute" or State.TimeOption == "Custom" then
-        SetDisplayText("You can only select 1 option")
-        return
-    end
-    
-    if State.TimeOption == "FiveMinute" then
+    if State.TimeOption == "5min" then
         State.TimeOption = nil
         State.WaitTime = 0
-        State.DisplayTime = 0
-        fiveminutebutton.TextColor3 = Color3.fromRGB(255, 255, 255)
     else
-        State.TimeOption = "FiveMinute"
+        State.TimeOption = "5min"
         State.WaitTime = 300
-        State.DisplayTime = 300
-        fiveminutebutton.TextColor3 = Color3.fromRGB(85, 255, 0)
+        Min5Btn.TextColor3 = Color3.fromRGB(85, 255, 0)
     end
 end)
 
-setbutton.MouseButton1Click:Connect(function()
-    if State.Running then
-        SetDisplayText("Cant Change while Running")
-        return
-    end
+SetButton.MouseButton1Click:Connect(function()
+    if State.Running then return end
+    ResetVisuals()
     
-    if State.TimeOption == "Minute" or State.TimeOption == "FiveMinute" then
-        SetDisplayText("You can only select 1 option")
-        return
-    end
-    
-    if State.TimeOption == "Custom" then
-        State.TimeOption = nil
-        State.WaitTime = 0
-        State.DisplayTime = 0
-        setbutton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    else
-        local inputText = TextBox and TextBox.Text or ""
-        local inputTime = tonumber(inputText)
-        
-        if not inputTime or inputTime <= 0 then
-            SetDisplayText("Enter a valid number")
-            return
-        end
-        
+    local num = tonumber(TimeInput.Text)
+    if num and num > 0 then
         State.TimeOption = "Custom"
-        State.WaitTime = inputTime
-        State.DisplayTime = inputTime
-        setbutton.TextColor3 = Color3.fromRGB(85, 255, 0)
+        State.WaitTime = num
+        SetButton.TextColor3 = Color3.fromRGB(85, 255, 0)
+    else
+        StatusLabel.Text = "Invalid Number"
     end
 end)
 
@@ -512,4 +329,4 @@ StartButton.MouseButton1Click:Connect(function()
     task.spawn(StartTracking)
 end)
 
-print("Rebirth Tracker Loaded")
+print("Rebirth Tracker Loaded - No Overlaps Version")
