@@ -72,7 +72,7 @@ Container.BackgroundTransparency = 1
 
 -- [[ POSITION ADJUSTMENT HERE ]]
 -- Changed -3.2 to -5.5 to move it much higher up the screen
-Container.Position = UDim2.new(0, 0, -5.5, 0) 
+Container.Position = UDim2.new(0, 0, -4, 0) 
 Container.Size = UDim2.new(1, 0, 3, 0)
 Container.ZIndex = 10
 
